@@ -33,7 +33,7 @@ public class RetentionManager {
 
     public synchronized void doMaintenance() {
         if (period > 0) {
-            long now = new Date().getTime();
+            long now = System.currentTimeMillis();
             if (isCleanupDue(now)) {
                 Log.i(LOG_TAG, "Performing data retention maintenance...");
                 deleteSince(getThreshold(now));

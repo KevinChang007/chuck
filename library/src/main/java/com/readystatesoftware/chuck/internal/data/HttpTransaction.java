@@ -16,6 +16,8 @@
 package com.readystatesoftware.chuck.internal.data;
 
 import android.net.Uri;
+import android.os.Parcel;
+import android.os.Parcelable;
 
 import com.google.gson.reflect.TypeToken;
 import com.readystatesoftware.chuck.internal.support.FormatUtils;
@@ -30,7 +32,121 @@ import java.util.Locale;
 import nl.qbusict.cupboard.annotation.Index;
 import okhttp3.Headers;
 
-public class HttpTransaction {
+public class HttpTransaction implements Parcelable {
+
+    public HttpTransaction() {
+    }
+
+    protected HttpTransaction(Parcel in) {
+        if (in.readByte() == 0) {
+            _id = null;
+        } else {
+            _id = in.readLong();
+        }
+        if (in.readByte() == 0) {
+            tookMs = null;
+        } else {
+            tookMs = in.readLong();
+        }
+        protocol = in.readString();
+        method = in.readString();
+        url = in.readString();
+        host = in.readString();
+        path = in.readString();
+        scheme = in.readString();
+        if (in.readByte() == 0) {
+            requestContentLength = null;
+        } else {
+            requestContentLength = in.readLong();
+        }
+        requestContentType = in.readString();
+        requestHeaders = in.readString();
+        requestBody = in.readString();
+        requestBodyIsPlainText = in.readByte() != 0;
+        if (in.readByte() == 0) {
+            responseCode = null;
+        } else {
+            responseCode = in.readInt();
+        }
+        responseMessage = in.readString();
+        error = in.readString();
+        if (in.readByte() == 0) {
+            responseContentLength = null;
+        } else {
+            responseContentLength = in.readLong();
+        }
+        responseContentType = in.readString();
+        responseHeaders = in.readString();
+        responseBody = in.readString();
+        responseBodyIsPlainText = in.readByte() != 0;
+    }
+
+    public static final Creator<HttpTransaction> CREATOR = new Creator<HttpTransaction>() {
+        @Override
+        public HttpTransaction createFromParcel(Parcel in) {
+            return new HttpTransaction(in);
+        }
+
+        @Override
+        public HttpTransaction[] newArray(int size) {
+            return new HttpTransaction[size];
+        }
+    };
+
+    @Override
+    public int describeContents() {
+        return 0;
+    }
+
+    @Override
+    public void writeToParcel(Parcel dest, int flags) {
+        if (_id == null) {
+            dest.writeByte((byte) 0);
+        } else {
+            dest.writeByte((byte) 1);
+            dest.writeLong(_id);
+        }
+        if (tookMs == null) {
+            dest.writeByte((byte) 0);
+        } else {
+            dest.writeByte((byte) 1);
+            dest.writeLong(tookMs);
+        }
+        dest.writeString(protocol);
+        dest.writeString(method);
+        dest.writeString(url);
+        dest.writeString(host);
+        dest.writeString(path);
+        dest.writeString(scheme);
+        if (requestContentLength == null) {
+            dest.writeByte((byte) 0);
+        } else {
+            dest.writeByte((byte) 1);
+            dest.writeLong(requestContentLength);
+        }
+        dest.writeString(requestContentType);
+        dest.writeString(requestHeaders);
+        dest.writeString(requestBody);
+        dest.writeByte((byte) (requestBodyIsPlainText ? 1 : 0));
+        if (responseCode == null) {
+            dest.writeByte((byte) 0);
+        } else {
+            dest.writeByte((byte) 1);
+            dest.writeInt(responseCode);
+        }
+        dest.writeString(responseMessage);
+        dest.writeString(error);
+        if (responseContentLength == null) {
+            dest.writeByte((byte) 0);
+        } else {
+            dest.writeByte((byte) 1);
+            dest.writeLong(responseContentLength);
+        }
+        dest.writeString(responseContentType);
+        dest.writeString(responseHeaders);
+        dest.writeString(responseBody);
+        dest.writeByte((byte) (responseBodyIsPlainText ? 1 : 0));
+    }
 
     public enum Status {
         Requested,
@@ -330,7 +446,7 @@ public class HttpTransaction {
             case Requested:
                 return null;
             default:
-                return String.valueOf(responseCode) + " " + responseMessage;
+                return responseCode + " " + responseMessage;
         }
     }
 
@@ -341,12 +457,12 @@ public class HttpTransaction {
             case Requested:
                 return " . . .  " + path;
             default:
-                return String.valueOf(responseCode) + " " + path;
+                return responseCode + " " + path;
         }
     }
 
     public boolean isSsl() {
-        return scheme.toLowerCase().equals("https");
+        return "https".equals(scheme.toLowerCase());
     }
 
     private List<HttpHeader> toHttpHeaderList(Headers headers) {
@@ -369,5 +485,34 @@ public class HttpTransaction {
 
     private String formatBytes(long bytes) {
         return FormatUtils.formatByteCount(bytes, true);
+    }
+
+    @Override
+    public String toString() {
+        return "HttpTransaction{" +
+                "_id=" + _id +
+                ", requestDate=" + requestDate +
+                ", responseDate=" + responseDate +
+                ", tookMs=" + tookMs +
+                ", protocol='" + protocol + '\'' +
+                ", method='" + method + '\'' +
+                ", url='" + url + '\'' +
+                ", host='" + host + '\'' +
+                ", path='" + path + '\'' +
+                ", scheme='" + scheme + '\'' +
+                ", requestContentLength=" + requestContentLength +
+                ", requestContentType='" + requestContentType + '\'' +
+                ", requestHeaders='" + requestHeaders + '\'' +
+                ", requestBody='" + requestBody + '\'' +
+                ", requestBodyIsPlainText=" + requestBodyIsPlainText +
+                ", responseCode=" + responseCode +
+                ", responseMessage='" + responseMessage + '\'' +
+                ", error='" + error + '\'' +
+                ", responseContentLength=" + responseContentLength +
+                ", responseContentType='" + responseContentType + '\'' +
+                ", responseHeaders='" + responseHeaders + '\'' +
+                ", responseBody='" + responseBody + '\'' +
+                ", responseBodyIsPlainText=" + responseBodyIsPlainText +
+                '}';
     }
 }

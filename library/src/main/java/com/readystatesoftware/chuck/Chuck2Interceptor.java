@@ -15,21 +15,15 @@
  */
 package com.readystatesoftware.chuck;
 
-import android.content.ContentValues;
-import android.content.Context;
 import android.net.Uri;
-import android.support.annotation.NonNull;
 import android.util.Log;
 
-import com.readystatesoftware.chuck.internal.data.ChuckContentProvider;
 import com.readystatesoftware.chuck.internal.data.HttpTransaction;
-import com.readystatesoftware.chuck.internal.data.LocalCupboard;
-import com.readystatesoftware.chuck.internal.support.NotificationHelper;
-import com.readystatesoftware.chuck.internal.support.RetentionManager;
 
 import java.io.EOFException;
 import java.io.IOException;
 import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
 import java.nio.charset.UnsupportedCharsetException;
 import java.util.Date;
 import java.util.concurrent.TimeUnit;
@@ -50,81 +44,12 @@ import okio.Okio;
 /**
  * An OkHttp Interceptor which persists and displays HTTP activity in your application for later inspection.
  */
-public final class ChuckInterceptor implements Interceptor {
+public abstract class Chuck2Interceptor implements Interceptor {
 
-    public enum Period {
-        /**
-         * Retain data for the last hour.
-         */
-        ONE_HOUR,
-        /**
-         * Retain data for the last day.
-         */
-        ONE_DAY,
-        /**
-         * Retain data for the last week.
-         */
-        ONE_WEEK,
-        /**
-         * Retain data forever.
-         */
-        FOREVER
-    }
 
     private static final String LOG_TAG = "ChuckInterceptor";
-    private static final Period DEFAULT_RETENTION = Period.ONE_WEEK;
-    private static final Charset UTF8 = Charset.forName("UTF-8");
-
-    private final Context context;
-    private final NotificationHelper notificationHelper;
-    private RetentionManager retentionManager;
-    private boolean showNotification;
+    private static final Charset UTF8 = StandardCharsets.UTF_8;
     private long maxContentLength = 250000L;
-
-    /**
-     * @param context The current Context.
-     */
-    public ChuckInterceptor(Context context) {
-        this.context = context.getApplicationContext();
-        notificationHelper = new NotificationHelper(this.context);
-        showNotification = true;
-        retentionManager = new RetentionManager(this.context, DEFAULT_RETENTION);
-    }
-
-    /**
-     * Control whether a notification is shown while HTTP activity is recorded.
-     *
-     * @param show true to show a notification, false to suppress it.
-     * @return The {@link ChuckInterceptor} instance.
-     */
-    public ChuckInterceptor showNotification(boolean show) {
-        showNotification = show;
-        return this;
-    }
-
-    /**
-     * Set the maximum length for request and response content before it is truncated.
-     * Warning: setting this value too high may cause unexpected results.
-     *
-     * @param max the maximum length (in bytes) for request/response content.
-     * @return The {@link ChuckInterceptor} instance.
-     */
-    public ChuckInterceptor maxContentLength(long max) {
-        this.maxContentLength = max;
-        return this;
-    }
-  
-    /**
-     * Set the retention period for HTTP transaction data captured by this interceptor.
-     * The default is one week.
-     *
-     * @param period the peroid for which to retain HTTP transaction data.
-     * @return The {@link ChuckInterceptor} instance.
-     */
-    public ChuckInterceptor retainDataFor(Period period) {
-        retentionManager = new RetentionManager(context, period);
-        return this;
-    }
 
     @Override
     public Response intercept(Chain chain) throws IOException {
@@ -147,6 +72,8 @@ public final class ChuckInterceptor implements Interceptor {
         doAfterResponse(transaction, transactionUri, response, tookMs);
         return response;
     }
+
+
 
     private HttpTransaction getHttpTransaction(Request request) throws IOException {
 
@@ -198,13 +125,12 @@ public final class ChuckInterceptor implements Interceptor {
      * @return true-处理成功，Response的contentType.charset(UTF8)，设置成功；false-设置失败
      * @throws IOException
      */
-    private void doAfterResponse(
-            HttpTransaction transaction, Uri transactionUri, @NonNull Response response, long tookMs)
-            throws IOException {
+    private void doAfterResponse(HttpTransaction transaction, Uri transactionUri, Response response, long tookMs) throws IOException {
         ResponseBody responseBody = response.body();
         if (responseBody == null) {
             return;
         }
+
         // includes headers added later in the chain
         transaction.setRequestHeaders(response.request().headers());
         transaction.setResponseDate(new Date());
@@ -214,56 +140,52 @@ public final class ChuckInterceptor implements Interceptor {
         transaction.setResponseMessage(response.message());
 
         transaction.setResponseContentLength(responseBody.contentLength());
-        final MediaType mediaType = responseBody.contentType();
-        if (mediaType != null) {
-            transaction.setResponseContentType(mediaType.toString());
+        if (responseBody.contentType() != null) {
+            transaction.setResponseContentType(responseBody.contentType().toString());
         }
         transaction.setResponseHeaders(response.headers());
 
         transaction.setResponseBodyIsPlainText(!bodyHasUnsupportedEncoding(response.headers()));
         if (HttpHeaders.hasBody(response) && transaction.responseBodyIsPlainText()) {
             BufferedSource source = getNativeSource(response);
-            source.request(Long.MAX_VALUE);
-            Buffer buffer = source.buffer();
-            Charset charset = UTF8;
-            MediaType contentType = mediaType;
-            if (contentType != null) {
-                try {
-                    charset = contentType.charset(UTF8);
-                } catch (UnsupportedCharsetException e) {
-                    update(transaction, transactionUri);
-                    return;
+            if (source != null) {
+                source.request(Long.MAX_VALUE);
+                Buffer buffer = source.buffer();
+                Charset charset = UTF8;
+                MediaType contentType = responseBody.contentType();
+                if (contentType != null) {
+                    try {
+                        charset = contentType.charset(UTF8);
+                    } catch (UnsupportedCharsetException e) {
+                        update(transaction, transactionUri);
+                        return;
+                    }
                 }
+                if (isPlaintext(buffer)) {
+                    transaction.setResponseBody(readFromBuffer(buffer.clone(), charset));
+                } else {
+                    transaction.setResponseBodyIsPlainText(false);
+                }
+                transaction.setResponseContentLength(buffer.size());
             }
-            if (isPlaintext(buffer)) {
-                transaction.setResponseBody(readFromBuffer(buffer.clone(), charset));
-            } else {
-                transaction.setResponseBodyIsPlainText(false);
-            }
-            transaction.setResponseContentLength(buffer.size());
         }
         update(transaction, transactionUri);
     }
 
-    private Uri create(HttpTransaction transaction) {
-        ContentValues values = LocalCupboard.getInstance().withEntity(HttpTransaction.class).toContentValues(transaction);
-        Uri uri = context.getContentResolver().insert(ChuckContentProvider.TRANSACTION_URI, values);
-        transaction.setId(Long.valueOf(uri.getLastPathSegment()));
-        if (showNotification) {
-            notificationHelper.show(transaction);
-        }
-        retentionManager.doMaintenance();
-        return uri;
-    }
+    /**
+     * IPC写事物
+     * @param transaction
+     * @return
+     */
+    protected abstract Uri create(HttpTransaction transaction);
 
-    private int update(HttpTransaction transaction, Uri uri) {
-        ContentValues values = LocalCupboard.getInstance().withEntity(HttpTransaction.class).toContentValues(transaction);
-        int updated = context.getContentResolver().update(uri, values, null, null);
-        if (showNotification && updated > 0) {
-            notificationHelper.show(transaction);
-        }
-        return updated;
-    }
+    /**
+     * IPC更新事物
+     * @param transaction
+     * @param uri
+     * @return
+     */
+    protected abstract int update(HttpTransaction transaction, Uri uri);
 
     /**
      * Returns true if the body in question probably contains human readable text. Uses a small sample
@@ -309,10 +231,10 @@ public final class ChuckInterceptor implements Interceptor {
         try {
             body = buffer.readString(maxBytes, charset);
         } catch (EOFException e) {
-            body += context.getString(R.string.chuck_body_unexpected_eof);
+            body += "\n\n--- Unexpected end of content ---";
         }
         if (bufferSize > maxContentLength) {
-            body += context.getString(R.string.chuck_body_content_truncated);
+            body += "\n\n--- Content truncated ---";
         }
         return body;
     }
@@ -335,6 +257,9 @@ public final class ChuckInterceptor implements Interceptor {
                 Log.w(LOG_TAG, "gzip encoded response was too long");
             }
         }
-        return response.body().source();
+        if (response.body() != null) {
+            return response.body().source();
+        }
+        return null;
     }
 }
